@@ -1,0 +1,246 @@
+--------------------------------------------------------------
+-- Reference:
+-- Practical SQL: A Beginner's Guide to Storytelling with Data
+-- by Anthony DeBarros
+
+--------------------------------------------------------------
+
+-- Data can be found at https://www.nostarch.com/practicalSQL/
+
+
+14. ANALYZING SPATIAL DATA WITH POSTGIS
+
+
+-- 14-1: Creating a gis_analysis database
+CREATE DATABASE gis_analysis;
+
+ -- 14-2: Loading the PostGIS extension
+CREATE EXTENSION postgis;
+SELECT * FROM pg_extension;
+SELECT postgis_full_version(); -- to display the version number of PostGIS along with its installed components
+
+-- Spatial Reference System Identifier
+-- 14-3: Retrieving the WKT for SRID 4326
+SELECT srtext
+FROM spatial_ref_sys
+WHERE srid = 4326;
+
+-- PostGIS Data Types
+-- geography A data type based on a sphere, using the round-earth coordinate system (longitude and latitude)
+-- geometry A data type based on a plane, using the Euclidean coordinate system
+
+-- Creating Spatial Objects with PostGIS Functions
+-- Creating a Geometry Type from Well-Known Text
+-- The ST_GeomFromText(WKT, SRID) function creates a geometry data type from an input of a WKT string and an optional SRID
+-- 14-4: Using ST_GeomFromText() to create spatial objects
+SELECT ST_GeomFromText('POINT(-74.9233606 42.699992)', 4326);
+SELECT ST_GeomFromText('LINESTRING(-74.9 42.7, -75.1 42.7)', 4326);
+SELECT ST_GeomFromText('POLYGON((-74.9 42.7, -75.1 42.7, -75.1 42.6, -74.9 42.7))', 4326);
+SELECT ST_GeomFromText('MULTIPOINT (-74.9 42.7, -75.1 42.7)', 4326);
+SELECT ST_GeomFromText('MULTILINESTRING(
+					(-76.27 43.1, -76.06 43.08),
+					(-76.2 43.3, -76.2 43.4, -76.4 43.1)
+				)', 4326);
+SELECT ST_GeomFromText('MULTIPOLYGON((
+					(-74.92 42.7, -75.06 42.71, -75.07 42.64, -74.92 42.7),
+					(-75.0 42.66, -75.0 42.64, -74.98 42.64, -74.98 42.66, -75.0 42.66)
+				))', 4326);
+
+-- Creating a Geography Type from Well-Known Text
+/* Use ST_GeogFromText(WKT) to convert a
+WKT or ST_GeogFromText(EWKT) to convert a PostGIS-specific variation called
+extended WKT that includes the SRID */
+-- 14-5: Using ST_GeogFromText() to create spatial objects
+SELECT
+ST_GeogFromText('SRID=4326;
+		MULTIPOINT(-74.9 42.7, -75.1 42.7, -74.924 42.6)');
+
+-- Point Functions
+-- ST_PointFromText() and ST_MakePoint() functions will turn a WKT POINT into a geometry data type
+-- 14-6: Functions specific to making Points
+-- The ST_PointFromText(WKT, SRID) function creates a point geometry type from a WKT POINT
+SELECT ST_PointFromText('POINT(-74.9233606 42.699992)', 4326);
+
+-- The ST_MakePoint(x, y, z, m) function creates a point geometry type on a two-, three-, and four-dimensional grid
+SELECT ST_MakePoint(-74.9233606, 42.699992);
+SELECT ST_SetSRID(ST_MakePoint(-74.9233606, 42.699992), 4326); -- specify an SRID
+
+-- LineString Functions
+-- 14-7: Functions specific to making LineStrings
+-- ST_LineFromText(WKT, SRID) function creates a LineString from a WKT LINESTRING
+SELECT ST_LineFromText('LINESTRING(-105.90 35.67,-105.91 35.67)', 4326);
+
+-- ST_MakeLine(geom, geom) function creates a LineString from inputs that must be of the geometry data type
+SELECT ST_MakeLine(ST_MakePoint(-74.9, 42.7), ST_MakePoint(-74.1, 42.4));
+
+-- Polygon Functions
+--  ST_PolygonFromText(), ST_MakePolygon(), and ST_MPolyFromText(). All create geometry data types
+-- 14-8: Functions specific to making Polygons
+-- The ST_PolygonFromText(WKT, SRID) function creates a Polygon from a WKT POLYGON
+SELECT ST_PolygonFromText(
+			'POLYGON((-74.9 42.7, -75.1 42.7, -75.1 42.6, -74.9 42.7))', 
+			4326);
+		
+-- The ST_MakePolygon(linestring) function creates a Polygon from a LineString that must open and close with the same coordinates							
+SELECT ST_MakePolygon(
+			ST_GeomFromText('LINESTRING(-74.92 42.7, -75.06 42.71, -75.07 42.64, -74.92 42.7)', 
+			4326));
+
+-- The ST_MPolyFromText(WKT, SRID) function creates a MultiPolygon from a WKT
+SELECT ST_MPolyFromText('MULTIPOLYGON((
+					(-74.92 42.7, -75.06 42.71, -75.07 42.64, -74.92 42.7),
+					(-75.0 42.66, -75.0 42.64, -74.98 42.64, -74.98 42.66, -75.0 42.66)))', 
+				4326);
+
+-- Analyzing Farmers’ Markets Data
+-- 14-9: Creating and loading the farmers_markets table
+CREATE TABLE farmers_markets (
+	fmid bigint PRIMARY KEY,
+	market_name varchar(100) NOT NULL,
+	street varchar(180),
+	city varchar(60),
+	county varchar(25),
+	st varchar(20) NOT NULL,
+	zip varchar(10),
+	longitude numeric(10,7),
+	latitude numeric(10,7),
+	organic varchar(1) NOT NULL
+);
+
+COPY farmers_markets 
+FROM 'C:/Users/QDS/PostGIS_Projects/farmers_markets.csv' 
+WITH (FORMAT CSV, HEADER);
+
+SELECT count(*) FROM farmers_markets;
+
+-- Creating and Filling a Geography Column
+-- 14-10: Creating and indexing a geography column
+ALTER TABLE farmers_markets 
+ADD COLUMN geog_point geography(POINT,4326);
+
+UPDATE farmers_markets
+SET geog_point =
+		ST_SetSRID(
+			ST_MakePoint(longitude,latitude),4326
+		)::geography;
+
+-- For spatial data, adds a GiST (Generalized Search Tree) index to geog_point
+CREATE INDEX market_pts_idx ON farmers_markets USING GIST (geog_point); 
+
+SELECT longitude,
+	latitude,
+	geog_point,
+	ST_AsText(geog_point) -- ST_AsText() function to view the WKT version of geog_point
+FROM farmers_markets
+WHERE longitude IS NOT NULL
+LIMIT 5;
+
+-- Finding Geographies Within a Given Distance
+-- ST_DWithin() returns a Boolean value of true if one spatial object is within a specified distance of another object.
+-- The related ST_DFullyWithin() function to find objects that are completely within a specified distance
+-- 14-11: Using ST_DWithin() to locate farmers’ markets within 10 kilometers of a point
+SELECT market_name,
+	city,
+	st
+FROM farmers_markets
+WHERE ST_DWithin(geog_point,
+		ST_GeogFromText('POINT(-93.6204386 41.5853202)'), -- returns a point geography from WKT
+		10000) -- number of meters in 10 kilometers
+ORDER BY market_name;
+
+-- Finding the Distance Between Geographies
+-- The ST_Distance() function returns the minimum distance between two spatial objects. 
+-- 14-12: Using ST_Distance() to calculate the miles between Yankee Stadium and Citi Field (Mets)
+SELECT ST_Distance(
+		ST_GeogFromText('POINT(-73.9283685 40.8296466)'),
+		ST_GeogFromText('POINT(-73.8480153 40.7570917)')
+		) / 1609.344 AS mets_to_yanks; -- 1609.344 is the number of meters in a mile
+
+-- 14-13: Using ST_Distance() for each row in farmers_markets
+SELECT market_name,
+	city,
+	round(
+		(ST_Distance(geog_point,
+			ST_GeogFromText('POINT(-93.6204386 41.5853202)')
+		) / 1609.344)::numeric(8,5), 2
+	) AS miles_from_dt
+FROM farmers_markets
+WHERE ST_DWithin(geog_point,
+		ST_GeogFromText('POINT(-93.6204386 41.5853202)'),
+		10000)
+ORDER BY miles_from_dt ASC;
+
+-- Working with Census Shapefiles
+-- Loading Shapefiles via the GUI Tool. Please reference to textbook
+-- Exploring the Census 2010 Counties Shapefile
+-- The geom column contains the spatial data
+SELECT * FROM us_counties_2010_shp LIMIT 3;
+
+-- 14-14: Checking the geom column’s WKT representation
+SELECT ST_AsText(geom)
+FROM us_counties_2010_shp
+LIMIT 1;
+
+-- Finding the Largest Counties in Square Miles
+-- ST_Area() function returns the area of a Polygon or MultiPolygon object
+-- 14-15: Finding the largest counties by area using ST_Area()
+SELECT name10,
+	statefp10 AS st,
+	round( -- 2589988.110336 is the number of square meters in a square mile
+		(ST_Area(geom::geography) / 2589988.110336 )::numeric, 2 
+	) AS square_miles
+FROM us_counties_2010_shp
+ORDER BY square_miles DESC
+LIMIT 5;
+
+-- Finding a County by Longitude and Latitude
+-- ST_Within() function returns true if one geometry is inside another. Both geometry inputs must have the same SRID
+-- 14-16: Using ST_Within() to find the county belonging to a pair of coordinates
+SELECT name10,
+	statefp10
+FROM us_counties_2010_shp
+WHERE ST_Within('SRID=4269;POINT(-118.3419063 34.0977076)'::geometry, geom);
+
+-- Performing Spatial Joins
+-- Exploring Roads and Waterways Data
+-- The ST_GeometryType() function returns the type of geometry of a given geometry object such as POINT, LINESTRING, POLYGON
+-- 14-17: Using ST_GeometryType() to determine geometry
+SELECT ST_GeometryType(geom)
+FROM santafe_linearwater_2016
+LIMIT 1;
+
+SELECT ST_GeometryType(geom)
+FROM santafe_roads_2016
+LIMIT 1;
+
+-- Joining the Census Roads and Water Tables
+-- ST_Intersects() function returns true if two spatial objects contact each other. 
+-- Inputs can be either geometry or geography types.
+-- 14-18: Spatial join with ST_Intersects() to find roads crossing the Santa Fe River
+SELECT water.fullname AS waterway,
+	roads.rttyp, -- route type
+	roads.fullname AS road
+FROM santafe_linearwater_2016 water 
+	JOIN santafe_roads_2016 roads ON ST_Intersects(water.geom, roads.geom)
+WHERE water.fullname = 'Santa Fe Riv'
+ORDER BY roads.fullname;
+
+-- Finding the Location Where Objects Intersect
+-- ST_Intersection() function returns the location of the place where objects cross
+-- 14-19: Using ST_Intersection() to show where roads cross the river
+SELECT water.fullname AS waterway,
+	roads.rttyp,
+	roads.fullname AS road,
+	ST_AsText(ST_Intersection(water.geom, roads.geom))
+FROM santafe_linearwater_2016 water 
+	JOIN santafe_roads_2016 roads ON ST_Intersects(water.geom, roads.geom)
+WHERE water.fullname = 'Santa Fe Riv'
+ORDER BY roads.fullname;
+
+
+
+
+
+
+
+
